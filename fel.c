@@ -81,8 +81,6 @@ struct aw_fel_version {
 static const int AW_USB_READ = 0x11;
 static const int AW_USB_WRITE = 0x12;
 
-static int AW_USB_FEL_BULK_EP_OUT;
-static int AW_USB_FEL_BULK_EP_IN;
 static int timeout = 60000;
 static bool verbose = false; /* If set, makes the 'fel' tool more talkative */
 static uint32_t uboot_entry = 0; /* entry point (address) of U-Boot */
@@ -178,13 +176,13 @@ static void aw_send_usb_request(felusb_handle *handle, int type, int length)
 		.unknown1 = htole32(0x0c000000)
 	};
 	req.length2 = req.length;
-	usb_bulk_send(handle, AW_USB_FEL_BULK_EP_OUT, &req, sizeof(req), false);
+	usb_bulk_send(handle, handle->endpoint_out, &req, sizeof(req), false);
 }
 
 static void aw_read_usb_response(felusb_handle *handle)
 {
 	char buf[13];
-	usb_bulk_recv(handle, AW_USB_FEL_BULK_EP_IN, buf, sizeof(buf));
+	usb_bulk_recv(handle, handle->endpoint_in, buf, sizeof(buf));
 	assert(strcmp(buf, "AWUS") == 0);
 }
 
@@ -192,14 +190,14 @@ static void aw_usb_write(felusb_handle *handle, const void *data, size_t len,
 			 bool progress)
 {
 	aw_send_usb_request(handle, AW_USB_WRITE, len);
-	usb_bulk_send(handle, AW_USB_FEL_BULK_EP_OUT, data, len, progress);
+	usb_bulk_send(handle, handle->endpoint_out, data, len, progress);
 	aw_read_usb_response(handle);
 }
 
 static void aw_usb_read(felusb_handle *handle, const void *data, size_t len)
 {
 	aw_send_usb_request(handle, AW_USB_READ, len);
-	usb_bulk_send(handle, AW_USB_FEL_BULK_EP_IN, data, len, false);
+	usb_bulk_send(handle, handle->endpoint_in, data, len, false);
 	aw_read_usb_response(handle);
 }
 
@@ -1359,7 +1357,7 @@ void pass_fel_information(felusb_handle *usb, uint32_t script_address)
 	}
 }
 
-static int aw_fel_get_endpoint(felusb_handle *handle)
+static int felusb_get_endpoint(felusb_handle *handle)
 {
 	struct libusb_device *dev = libusb_get_device(handle->usb);
 	struct libusb_config_descriptor *config;
@@ -1387,16 +1385,16 @@ static int aw_fel_get_endpoint(felusb_handle *handle)
 
 				if ((ep->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) ==
 						LIBUSB_ENDPOINT_IN)
-					AW_USB_FEL_BULK_EP_IN = ep->bEndpointAddress;
+					handle->endpoint_in = ep->bEndpointAddress;
 				else
-					AW_USB_FEL_BULK_EP_OUT = ep->bEndpointAddress;
+					handle->endpoint_out = ep->bEndpointAddress;
 			}
 		}
 	}
 
 	libusb_free_config_descriptor(config);
 
-	return 0;
+	return LIBUSB_SUCCESS;
 }
 
 /* private helper function, gets used for "write*" and "multi*" transfers */
@@ -1432,6 +1430,33 @@ static unsigned int file_upload(felusb_handle *handle, size_t count,
 	}
 
 	return i; /* return number of files that were processed */
+}
+
+void felusb_claim(felusb_handle *handle)
+{
+	int rc = libusb_claim_interface(handle->usb, 0);
+#if defined(__linux__)
+	if (rc != LIBUSB_SUCCESS) {
+		libusb_detach_kernel_driver(handle->usb, 0);
+		handle->iface_detached = true;
+		rc = libusb_claim_interface(handle->usb, 0);
+	}
+#endif
+	if (rc)
+		usb_error(rc, "libusb_claim_interface()", 1);
+
+	rc = felusb_get_endpoint(handle);
+	if (rc)
+		usb_error(rc, "FAILED to get FEL mode endpoint addresses!", 1);
+}
+
+void felusb_release(felusb_handle *handle)
+{
+	libusb_release_interface(handle->usb, 0);
+#if defined(__linux__)
+	if (handle->iface_detached)
+		libusb_attach_kernel_driver(handle->usb, 0);
+#endif
 }
 
 /* open libusb handle to desired FEL device */
@@ -1515,9 +1540,6 @@ int main(int argc, char **argv)
 	bool pflag_active = false; /* -p switch, causing "write" to output progress */
 	felusb_handle *handle;
 	int busnum = -1, devnum = -1;
-#if defined(__linux__)
-	int iface_detached = -1;
-#endif
 
 	if (argc <= 1) {
 		printf("Usage: %s [options] command arguments... [command...]\n"
@@ -1589,20 +1611,7 @@ int main(int argc, char **argv)
 	assert(rc == 0);
 	handle = open_fel_device(busnum, devnum, AW_USB_VENDOR_ID, AW_USB_PRODUCT_ID);
 	assert(handle != NULL);
-	rc = libusb_claim_interface(handle->usb, 0);
-#if defined(__linux__)
-	if (rc != LIBUSB_SUCCESS) {
-		libusb_detach_kernel_driver(handle->usb, 0);
-		iface_detached = 0;
-		rc = libusb_claim_interface(handle->usb, 0);
-	}
-#endif
-	assert(rc == 0);
-
-	if (aw_fel_get_endpoint(handle)) {
-		fprintf(stderr, "ERROR: Failed to get FEL mode endpoint addresses!\n");
-		exit(1);
-	}
+	felusb_claim(handle);
 
 	while (argc > 1 ) {
 		int skip = 1;
@@ -1693,11 +1702,7 @@ int main(int argc, char **argv)
 		aw_fel_execute(handle, uboot_entry);
 	}
 
-	libusb_release_interface(handle->usb, 0);
-#if defined(__linux__)
-	if (iface_detached >= 0)
-		libusb_attach_kernel_driver(handle->usb, iface_detached);
-#endif
+	felusb_release(handle);
 	felusb_close(handle);
 	libusb_exit(NULL);
 
