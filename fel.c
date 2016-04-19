@@ -15,7 +15,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <libusb.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
@@ -29,103 +28,14 @@
 #include <sys/stat.h>
 
 #include "common.h"
+#include "fel_usblib.h"
 #include "portable_endian.h"
 #include "progress.h"
 
-static const uint16_t AW_USB_VENDOR_ID  = 0x1F3A;
-static const uint16_t AW_USB_PRODUCT_ID = 0xEFE8;
-
-/* a helper function to report libusb errors */
-void usb_error(int rc, const char *caption, int exitcode)
-{
-	if (caption)
-		pr_error("%s ", caption);
-
-#if defined(LIBUSBX_API_VERSION) && (LIBUSBX_API_VERSION >= 0x01000102)
-	pr_error("ERROR %d: %s\n", rc, libusb_strerror(rc));
-#else
-	/* assume that libusb_strerror() is missing in the libusb API */
-	pr_error("ERROR %d\n", rc);
-#endif
-
-	if (exitcode != 0)
-		exit(exitcode);
-}
-
-typedef struct {
-	libusb_device_handle *usb;
-	int endpoint_out, endpoint_in;
-	bool iface_detached;
-} felusb_handle;
-
-struct  aw_usb_request {
-	char signature[8];
-	uint32_t length;
-	uint32_t unknown1;	/* 0x0c000000 */
-	uint16_t request;
-	uint32_t length2;	/* Same as length */
-	char	pad[10];
-}  __attribute__((packed));
-
-struct aw_fel_version {
-	char signature[8];
-	uint32_t soc_id;	/* 0x00162300 */
-	uint32_t unknown_0a;	/* 1 */
-	uint16_t protocol;	/* 1 */
-	uint8_t  unknown_12;	/* 0x44 */
-	uint8_t  unknown_13;	/* 0x08 */
-	uint32_t scratchpad;	/* 0x7e00 */
-	uint32_t pad[2];	/* unused */
-} __attribute__((packed));
-
-static const int AW_USB_READ = 0x11;
-static const int AW_USB_WRITE = 0x12;
-
-static int timeout = 60000;
 static bool verbose = false; /* If set, makes the 'fel' tool more talkative */
 static uint32_t uboot_entry = 0; /* entry point (address) of U-Boot */
 static uint32_t uboot_size  = 0; /* size of U-Boot binary */
 
-
-static const int AW_USB_MAX_BULK_SEND = 4 * 1024 * 1024; /* 4 MiB per bulk request */
-
-void usb_bulk_send(felusb_handle *handle, int ep, const void *data,
-		   size_t length, bool progress)
-{
-	/*
-	 * With no progress notifications, we'll use the maximum chunk size.
-	 * Otherwise, it's useful to lower the size (have more chunks) to get
-	 * more frequent status updates. 128 KiB per request seem suitable.
-	 */
-	size_t max_chunk = progress ? 128 * 1024 : AW_USB_MAX_BULK_SEND;
-
-	size_t chunk;
-	int rc, sent;
-	while (length > 0) {
-		chunk = length < max_chunk ? length : max_chunk;
-		rc = libusb_bulk_transfer(handle->usb, ep, (void *)data, chunk,
-					  &sent, timeout);
-		if (rc != 0)
-			usb_error(rc, "usb_bulk_send()", 2);
-		length -= sent;
-		data += sent;
-
-		if (progress)
-			progress_update(sent); /* notification after each chunk */
-	}
-}
-
-void usb_bulk_recv(felusb_handle *handle, int ep, void *data, int length)
-{
-	int rc, recv;
-	while (length > 0) {
-		rc = libusb_bulk_transfer(handle->usb, ep, data, length, &recv, timeout);
-		if (rc != 0)
-			usb_error(rc, "usb_bulk_recv()", 2);
-		length -= recv;
-		data += recv;
-	}
-}
 
 /* Constants taken from ${U-BOOT}/include/image.h */
 #define IH_MAGIC	0x27051956	/* Image Magic Number	*/
@@ -167,83 +77,6 @@ int get_image_type(const uint8_t *buf, size_t len)
 	return buf[30];
 }
 
-static void aw_send_usb_request(felusb_handle *handle, int type, int length)
-{
-	struct aw_usb_request req = {
-		.signature = "AWUC",
-		.request = htole16(type),
-		.length = htole32(length),
-		.unknown1 = htole32(0x0c000000)
-	};
-	req.length2 = req.length;
-	usb_bulk_send(handle, handle->endpoint_out, &req, sizeof(req), false);
-}
-
-static void aw_read_usb_response(felusb_handle *handle)
-{
-	char buf[13];
-	usb_bulk_recv(handle, handle->endpoint_in, buf, sizeof(buf));
-	assert(strcmp(buf, "AWUS") == 0);
-}
-
-static void aw_usb_write(felusb_handle *handle, const void *data, size_t len,
-			 bool progress)
-{
-	aw_send_usb_request(handle, AW_USB_WRITE, len);
-	usb_bulk_send(handle, handle->endpoint_out, data, len, progress);
-	aw_read_usb_response(handle);
-}
-
-static void aw_usb_read(felusb_handle *handle, const void *data, size_t len)
-{
-	aw_send_usb_request(handle, AW_USB_READ, len);
-	usb_bulk_send(handle, handle->endpoint_in, data, len, false);
-	aw_read_usb_response(handle);
-}
-
-struct aw_fel_request {
-	uint32_t request;
-	uint32_t address;
-	uint32_t length;
-	uint32_t pad;
-};
-
-static const int AW_FEL_VERSION = 0x001;
-static const int AW_FEL_1_WRITE = 0x101;
-static const int AW_FEL_1_EXEC  = 0x102;
-static const int AW_FEL_1_READ  = 0x103;
-
-void aw_send_fel_request(felusb_handle *handle, int type,
-			 uint32_t addr, uint32_t length)
-{
-	struct aw_fel_request req = {
-		.request = htole32(type),
-		.address = htole32(addr),
-		.length = htole32(length)
-	};
-	aw_usb_write(handle, &req, sizeof(req), false);
-}
-
-void aw_read_fel_status(felusb_handle *handle)
-{
-	char buf[8];
-	aw_usb_read(handle, buf, sizeof(buf));
-}
-
-void aw_fel_get_version(felusb_handle *usb, struct aw_fel_version *buf)
-{
-	aw_send_fel_request(usb, AW_FEL_VERSION, 0, 0);
-	aw_usb_read(usb, buf, sizeof(*buf));
-	aw_read_fel_status(usb);
-
-	buf->soc_id = (le32toh(buf->soc_id) >> 8) & 0xFFFF;
-	buf->unknown_0a = le32toh(buf->unknown_0a);
-	buf->protocol = le32toh(buf->protocol);
-	buf->scratchpad = le16toh(buf->scratchpad);
-	buf->pad[0] = le32toh(buf->pad[0]);
-	buf->pad[1] = le32toh(buf->pad[1]);
-}
-
 void aw_fel_print_version(felusb_handle *usb)
 {
 	struct aw_fel_version buf;
@@ -269,31 +102,9 @@ void aw_fel_print_version(felusb_handle *usb)
 		buf.scratchpad, buf.pad[0], buf.pad[1]);
 }
 
-void aw_fel_read(felusb_handle *usb, uint32_t offset, void *buf, size_t len)
-{
-	aw_send_fel_request(usb, AW_FEL_1_READ, offset, len);
-	aw_usb_read(usb, buf, len);
-	aw_read_fel_status(usb);
-}
-
-void aw_fel_write(felusb_handle *usb, void *buf, uint32_t offset, size_t len)
-{
-	aw_send_fel_request(usb, AW_FEL_1_WRITE, offset, len);
-	aw_usb_write(usb, buf, len, false);
-	aw_read_fel_status(usb);
-}
-
-void aw_fel_execute(felusb_handle *usb, uint32_t offset)
-{
-	aw_send_fel_request(usb, AW_FEL_1_EXEC, offset, 0);
-	aw_read_fel_status(usb);
-}
-
 /*
- * This function is a higher-level wrapper for the FEL write functionality.
- * Unlike aw_fel_write() above - which is reserved for internal use - this
- * routine is meant to be called from "user" code, and supports (= allows)
- * progress callbacks.
+ * This wrapper for the FEL write functionality safeguards against overwriting
+ * an already loaded U-Boot binary.
  * The return value represents elapsed time in seconds (needed for execution).
  */
 double aw_write_buffer(felusb_handle *usb, void *buf, uint32_t offset,
@@ -301,8 +112,7 @@ double aw_write_buffer(felusb_handle *usb, void *buf, uint32_t offset,
 {
 	/* safeguard against overwriting an already loaded U-Boot binary */
 	if (uboot_size > 0 && offset <= uboot_entry + uboot_size
-			   && offset + len >= uboot_entry)
-	{
+			   && offset + len >= uboot_entry) {
 		fprintf(stderr, "ERROR: Attempt to overwrite U-Boot! "
 			"Request 0x%08X-0x%08X overlaps 0x%08X-0x%08X.\n",
 			offset, (uint32_t)(offset + len),
@@ -310,9 +120,7 @@ double aw_write_buffer(felusb_handle *usb, void *buf, uint32_t offset,
 		exit(1);
 	}
 	double start = gettime();
-	aw_send_fel_request(usb, AW_FEL_1_WRITE, offset, len);
-	aw_usb_write(usb, buf, len, progress);
-	aw_read_fel_status(usb);
+	aw_fel_write_buffer(usb, buf, offset, len, progress);
 	return gettime() - start;
 }
 
@@ -1357,46 +1165,6 @@ void pass_fel_information(felusb_handle *usb, uint32_t script_address)
 	}
 }
 
-static int felusb_get_endpoint(felusb_handle *handle)
-{
-	struct libusb_device *dev = libusb_get_device(handle->usb);
-	struct libusb_config_descriptor *config;
-	int if_idx, set_idx, ep_idx, ret;
-
-	ret = libusb_get_active_config_descriptor(dev, &config);
-	if (ret)
-		return ret;
-
-	for (if_idx = 0; if_idx < config->bNumInterfaces; if_idx++) {
-		const struct libusb_interface *iface = config->interface + if_idx;
-
-		for (set_idx = 0; set_idx < iface->num_altsetting; set_idx++) {
-			const struct libusb_interface_descriptor *setting =
-				iface->altsetting + set_idx;
-
-			for (ep_idx = 0; ep_idx < setting->bNumEndpoints; ep_idx++) {
-				const struct libusb_endpoint_descriptor *ep =
-					setting->endpoint + ep_idx;
-
-				/* Test for bulk transfer endpoint */
-				if ((ep->bmAttributes & LIBUSB_TRANSFER_TYPE_MASK) !=
-						LIBUSB_TRANSFER_TYPE_BULK)
-					continue;
-
-				if ((ep->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) ==
-						LIBUSB_ENDPOINT_IN)
-					handle->endpoint_in = ep->bEndpointAddress;
-				else
-					handle->endpoint_out = ep->bEndpointAddress;
-			}
-		}
-	}
-
-	libusb_free_config_descriptor(config);
-
-	return LIBUSB_SUCCESS;
-}
-
 /* private helper function, gets used for "write*" and "multi*" transfers */
 static unsigned int file_upload(felusb_handle *handle, size_t count,
 				size_t argc, char **argv, progress_cb_t progress)
@@ -1430,124 +1198,6 @@ static unsigned int file_upload(felusb_handle *handle, size_t count,
 	}
 
 	return i; /* return number of files that were processed */
-}
-
-void felusb_claim(felusb_handle *handle)
-{
-	int rc = libusb_claim_interface(handle->usb, 0);
-#if defined(__linux__)
-	if (rc != LIBUSB_SUCCESS) {
-		libusb_detach_kernel_driver(handle->usb, 0);
-		handle->iface_detached = true;
-		rc = libusb_claim_interface(handle->usb, 0);
-	}
-#endif
-	if (rc)
-		usb_error(rc, "libusb_claim_interface()", 1);
-
-	rc = felusb_get_endpoint(handle);
-	if (rc)
-		usb_error(rc, "FAILED to get FEL mode endpoint addresses!", 1);
-}
-
-void felusb_release(felusb_handle *handle)
-{
-	libusb_release_interface(handle->usb, 0);
-#if defined(__linux__)
-	if (handle->iface_detached)
-		libusb_attach_kernel_driver(handle->usb, 0);
-#endif
-}
-
-/* open libusb handle to desired FEL device */
-static felusb_handle *open_fel_device(int busnum, int devnum,
-		uint16_t vendor_id, uint16_t product_id)
-{
-	felusb_handle *result = calloc(1, sizeof(felusb_handle));
-	if (!result) {
-		fprintf(stderr, "FAILED to allocate felusb_handle memory.\n");
-		exit(1);
-	}
-
-	if (busnum < 0 || devnum < 0) {
-		/* With the default values (busnum -1, devnum -1) we don't care
-		 * for a specific USB device; so let libusb open the first
-		 * device that matches VID/PID.
-		 */
-		result->usb = libusb_open_device_with_vid_pid(NULL, vendor_id, product_id);
-		if (!result->usb) {
-			switch (errno) {
-			case EACCES:
-				fprintf(stderr, "ERROR: You don't have permission to access Allwinner USB FEL device\n");
-				break;
-			default:
-				fprintf(stderr, "ERROR: Allwinner USB FEL device not found!\n");
-				break;
-			}
-			exit(1);
-		}
-	} else {
-		/* look for specific bus and device number */
-		bool found = false;
-		ssize_t rc, i;
-		libusb_device **list;
-
-		rc = libusb_get_device_list(NULL, &list);
-		if (rc < 0)
-			usb_error(rc, "libusb_get_device_list()", 1);
-		for (i = 0; i < rc; i++) {
-			if (libusb_get_bus_number(list[i]) == busnum
-			    && libusb_get_device_address(list[i]) == devnum) {
-				found = true; /* bus:devnum matched */
-				struct libusb_device_descriptor desc;
-				libusb_get_device_descriptor(list[i], &desc);
-				if (desc.idVendor != vendor_id
-				    || desc.idProduct != product_id) {
-					fprintf(stderr, "ERROR: Bus %03d Device %03d not a FEL device "
-						"(expected %04x:%04x, got %04x:%04x)\n", busnum, devnum,
-						vendor_id, product_id, desc.idVendor, desc.idProduct);
-					exit(1);
-				}
-				/* open handle to this specific device (incrementing its refcount) */
-				rc = libusb_open(list[i], &result->usb);
-				if (rc != 0)
-					usb_error(rc, "libusb_open()", 1);
-				break;
-			}
-		}
-		libusb_free_device_list(list, true);
-
-		if (!found) {
-			fprintf(stderr, "ERROR: Bus %03d Device %03d not found in libusb device list\n",
-				busnum, devnum);
-			exit(1);
-		}
-	}
-
-	felusb_claim(result); /* claim interface, detect USB endpoints */
-
-	return result;
-}
-
-void felusb_close(felusb_handle *handle)
-{
-	felusb_release(handle);
-	libusb_close(handle->usb);
-	free(handle); // release memory allocated for struct
-}
-
-void felusb_init(void)
-{
-	int rc = libusb_init(NULL);
-	if (rc != 0)
-		usb_error(rc, "libusb_init()", 1);
-}
-
-void felusb_done(felusb_handle *handle)
-{
-	if (handle)
-		felusb_close(handle);
-	libusb_exit(NULL);
 }
 
 int main(int argc, char **argv)
