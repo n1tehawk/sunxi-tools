@@ -30,7 +30,7 @@
 #include "common.h"
 #include "portable_endian.h"
 
-static int timeout = 60000;
+static int timeout = 10000; /* 10 seconds */
 
 /* This is our (private/opaque) data type that we'll pass as "handle" */
 struct _felusb_handle {
@@ -240,7 +240,16 @@ void felusb_done(felusb_handle *handle)
 	libusb_exit(NULL);
 }
 
-static const int AW_USB_MAX_BULK_SEND = 4 * 1024 * 1024; /* 4 MiB per bulk request */
+/*
+ * AW_USB_MAX_BULK_SEND and the timeout constant are related.
+ * Both need to be selected in a way that transferring the maximum chunk size
+ * with (SoC-specific) slow transfer speed won't time out.
+ *
+ * The 512 KiB here are chosen based on the assumption that we want a 10 seconds
+ * timeout, and "slow" transfers take place at approx. 64 KiB/sec - so we can
+ * expect the maximum chunk being transmitted within 8 seconds or less.
+ */
+static const int AW_USB_MAX_BULK_SEND = 512 * 1024; /* 512 KiB per bulk request */
 
 static void usb_bulk_send(felusb_handle *handle, int ep, const void *data,
 			  size_t length, bool progress)
@@ -249,6 +258,7 @@ static void usb_bulk_send(felusb_handle *handle, int ep, const void *data,
 	 * With no progress notifications, we'll use the maximum chunk size.
 	 * Otherwise, it's useful to lower the size (have more chunks) to get
 	 * more frequent status updates. 128 KiB per request seem suitable.
+	 * (Worst case of "slow" transfers -> one update every two seconds.)
 	 */
 	size_t max_chunk = progress ? 128 * 1024 : AW_USB_MAX_BULK_SEND;
 
