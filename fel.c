@@ -25,7 +25,6 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <unistd.h>
-#include <sys/stat.h>
 
 #include "common.h"
 #include "fel_usblib.h"
@@ -146,65 +145,6 @@ void hexdump(void *data, uint32_t offset, size_t size)
 		}
 		putchar('\n');
 	}
-}
-
-unsigned int file_size(const char *filename)
-{
-	struct stat st;
-	if (stat(filename, &st) != 0) {
-		fprintf(stderr, "stat() error on file \"%s\": %s\n", filename,
-			strerror(errno));
-		exit(1);
-	}
-	if (!S_ISREG(st.st_mode)) {
-		fprintf(stderr, "error: \"%s\" is not a regular file\n", filename);
-		exit(1);
-	}
-	return st.st_size;
-}
-
-int save_file(const char *name, void *data, size_t size)
-{
-	FILE *out = fopen(name, "wb");
-	int rc;
-	if (!out) {
-		perror("Failed to open output file");
-		exit(1);
-	}
-	rc = fwrite(data, size, 1, out);
-	fclose(out);
-	return rc;
-}
-
-void *load_file(const char *name, size_t *size)
-{
-	size_t bufsize = 8192;
-	size_t offset = 0;
-	char *buf = malloc(bufsize);
-	FILE *in;
-	if (strcmp(name, "-") == 0)
-		in = stdin;
-	else
-		in = fopen(name, "rb");
-	if (!in) {
-		perror("Failed to open input file");
-		exit(1);
-	}
-	
-	while (true) {
-		ssize_t len = bufsize - offset;
-		ssize_t n = fread(buf+offset, 1, len, in);
-		offset += n;
-		if (n < len)
-			break;
-		bufsize <<= 1;
-		buf = realloc(buf, bufsize);
-	}
-	if (size) 
-		*size = offset;
-	if (in != stdin)
-		fclose(in);
-	return buf;
 }
 
 void aw_fel_hexdump(felusb_handle *usb, uint32_t offset, size_t size)
@@ -1101,7 +1041,7 @@ void aw_fel_process_spl_and_uboot(felusb_handle *usb, const char *filename)
 {
 	/* load file into memory buffer */
 	size_t size;
-	uint8_t *buf = load_file(filename, &size);
+	uint8_t *buf = file_load(filename, &size);
 	/* write and execute the SPL from the buffer */
 	aw_fel_write_and_execute_spl(usb, buf, size);
 	/* check for optional main U-Boot binary (and transfer it, if applicable) */
@@ -1185,7 +1125,7 @@ static unsigned int file_upload(felusb_handle *handle, size_t count,
 
 	/* now transfer each file in turn */
 	for (i = 0; i < count; i++) {
-		void *buf = load_file(argv[i * 2 + 1], &size);
+		void *buf = file_load(argv[i * 2 + 1], &size);
 		if (size > 0) {
 			uint32_t offset = strtoul(argv[i * 2], NULL, 0);
 			aw_write_buffer(handle, buf, offset, size, true);
@@ -1334,7 +1274,7 @@ int main(int argc, char **argv)
 			size_t size = strtoul(argv[3], NULL, 0);
 			void *buf = malloc(size);
 			aw_fel_read(handle, strtoul(argv[2], NULL, 0), buf, size);
-			save_file(argv[4], buf, size);
+			file_save(argv[4], buf, size);
 			free(buf);
 			skip=4;
 		} else if (strcmp(argv[1], "clear") == 0 && argc > 2) {

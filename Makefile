@@ -101,7 +101,11 @@ LIBUSB = libusb-1.0
 LIBUSB_CFLAGS = `pkg-config --cflags $(LIBUSB)`
 LIBUSB_LIBS = `pkg-config --libs $(LIBUSB)`
 
-sunxi-fel: fel.c fel-to-spl-thunk.h progress.c progress.h fel_usblib.c fel_usblib.h
+COMMON = common.c common.h
+PROGRESS = progress.c progress.h
+USBLIB = fel_usblib.c fel_usblib.h
+
+sunxi-fel: fel.c fel-to-spl-thunk.h $(PROGRESS) $(USBLIB) $(COMMON)
 	$(CC) $(CFLAGS) $(LIBUSB_CFLAGS) $(LDFLAGS) -o $@ $(filter %.c,$^) $(LIBS) $(LIBUSB_LIBS)
 
 sunxi-nand-part: nand-part-main.c nand-part.c nand-part-a10.h nand-part-a20.h

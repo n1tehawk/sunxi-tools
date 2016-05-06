@@ -47,4 +47,10 @@
 		fflush(stdout); \
 	} while (0)
 
+/* functions implemented in common.c */
+
+unsigned int file_size(const char *filename);
+void *file_load(const char *name, size_t *size);
+int file_save(const char *name, void *data, size_t size);
+
 #endif /* _SUNXI_TOOLS_COMMON_H */
