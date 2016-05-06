@@ -17,7 +17,6 @@
  */
 
 #include <errno.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,61 +24,125 @@
 
 #include "common.h"
 
-unsigned int file_size(const char *filename)
+#define STDIN_INITIAL_CHUNK	8192
+
+inline bool file_exists(const char *filename)
 {
+	return access(filename, F_OK) == 0;
+}
+
+ssize_t file_size(const char *filename)
+{
+	ssize_t rc;
 	struct stat st;
 	if (stat(filename, &st) != 0) {
-		fprintf(stderr, "stat() error on file \"%s\": %s\n", filename,
-			strerror(errno));
-		exit(1);
+		rc = errno;
+		pr_error("stat() error on file \"%s\": %s\n",
+			 filename, strerror(rc));
+		return -rc;
 	}
 	if (!S_ISREG(st.st_mode)) {
-		fprintf(stderr, "error: \"%s\" is not a regular file\n", filename);
-		exit(1);
+		pr_error("file_size() error: \"%s\" is not a regular file\n",
+			 filename);
+		return -EINVAL;
 	}
 	return st.st_size;
 }
 
-int file_save(const char *name, void *data, size_t size)
+ssize_t file_save(const char *filename, void *data, size_t size)
 {
-	FILE *out = fopen(name, "wb");
-	int rc;
+	ssize_t rc;
+	FILE *out = fopen(filename, "wb");
 	if (!out) {
-		perror("Failed to open output file");
-		exit(1);
+		rc = errno;
+		pr_error("file_save() failed to open \"%s\": %s\n",
+			 filename, strerror(rc));
+		return -rc;
 	}
-	rc = fwrite(data, size, 1, out);
+	rc = fwrite(data, 1, size, out);
+	if (ferror(out))
+		rc = -errno;
 	fclose(out);
 	return rc;
 }
 
-void *file_load(const char *name, size_t *size)
+static void *file_load_stdin(ssize_t *size)
 {
-	size_t bufsize = 8192;
-	size_t offset = 0;
-	char *buf = malloc(bufsize);
-	FILE *in;
-	if (strcmp(name, "-") == 0)
-		in = stdin;
-	else
-		in = fopen(name, "rb");
-	if (!in) {
-		perror("Failed to open input file");
-		exit(1);
+	char *buffer = NULL;
+	size_t bufsize = STDIN_INITIAL_CHUNK, offset;
+	ssize_t rc;
+
+	for (offset = 0; !feof(stdin); offset += rc) {
+		buffer = realloc(buffer, bufsize);
+		if (!buffer) {
+			rc = -ENOMEM;
+		} else {
+			rc = fread(buffer + offset, 1, bufsize - offset, stdin);
+			if (ferror(stdin))
+				rc = -errno;
+		}
+		if (rc < 0) {
+			pr_error("error reading <stdin>: %s\n", strerror(-rc));
+			if (size)
+				*size = rc;
+			free(buffer);
+			return NULL;
+		}
+		bufsize <<= 1; /* double buffer size for next reallocation */
 	}
 
-	while (true) {
-		ssize_t len = bufsize - offset;
-		ssize_t n = fread(buf+offset, 1, len, in);
-		offset += n;
-		if (n < len)
-			break;
-		bufsize <<= 1;
-		buf = realloc(buf, bufsize);
-	}
+	if (offset != bufsize)
+		buffer = realloc(buffer, offset); /* allocate actual size */
 	if (size)
 		*size = offset;
-	if (in != stdin)
+	return buffer;
+}
+
+void *file_load(const char *filename, ssize_t *size)
+{
+	char *buffer = NULL;
+	size_t bufsize;
+	FILE *in;
+	ssize_t rc;
+
+	if (strcmp(filename, "-") == 0)
+		return file_load_stdin(size);
+
+	rc = file_size(filename);
+	if (rc > 0) {
+		bufsize = rc;
+		in = fopen(filename, "rb");
+		if (!in) {
+			rc = -errno;
+			pr_error("file_load() failed to open \"%s\": %s\n",
+				 filename, strerror(-rc));
+		}
+	}
+	if (rc <= 0) {
+		if (size)
+			*size = rc;
+		return NULL; /* error or empty file */
+	}
+
+	buffer = malloc(bufsize);
+	if (!buffer) {
+		rc = -ENOMEM;
+	} else {
+		rc = fread(buffer, 1, bufsize, in);
+		if (ferror(in))
+			rc = -errno;
+	}
+	if (rc < 0) {
+		pr_error("error reading \"%s\": %s\n", filename, strerror(-rc));
+		if (size)
+			*size = rc;
 		fclose(in);
-	return buf;
+		free(buffer);
+		return NULL;
+	}
+
+	if (size)
+		*size = rc;
+	fclose(in);
+	return buffer;
 }

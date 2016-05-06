@@ -17,7 +17,9 @@
 #ifndef _SUNXI_TOOLS_COMMON_H
 #define _SUNXI_TOOLS_COMMON_H
 
+#include <stdbool.h>
 #include <stddef.h> /* offsetof */
+#include <unistd.h> /* ssize_t */
 
 /** flag function argument as unused */
 #ifdef UNUSED
@@ -49,8 +51,9 @@
 
 /* functions implemented in common.c */
 
-unsigned int file_size(const char *filename);
-void *file_load(const char *name, size_t *size);
-int file_save(const char *name, void *data, size_t size);
+bool file_exists(const char *filename);
+ssize_t file_size(const char *filename);
+void *file_load(const char *filename, ssize_t *size);
+ssize_t file_save(const char *filename, void *data, size_t size);
 
 #endif /* _SUNXI_TOOLS_COMMON_H */

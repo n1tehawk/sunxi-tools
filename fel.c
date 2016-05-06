@@ -1040,8 +1040,12 @@ void aw_fel_write_uboot_image(felusb_handle *usb, uint8_t *buf, size_t len)
 void aw_fel_process_spl_and_uboot(felusb_handle *usb, const char *filename)
 {
 	/* load file into memory buffer */
-	size_t size;
+	ssize_t size;
 	uint8_t *buf = file_load(filename, &size);
+	if (size <= 0) {
+		pr_error("SPL/U-Boot error: File empty or failed to open\n");
+		return;
+	}
 	/* write and execute the SPL from the buffer */
 	aw_fel_write_and_execute_spl(usb, buf, size);
 	/* check for optional main U-Boot binary (and transfer it, if applicable) */
@@ -1116,10 +1120,14 @@ static unsigned int file_upload(felusb_handle *handle, size_t count,
 	}
 
 	/* get all file sizes, keeping track of total bytes */
-	size_t size = 0;
+	ssize_t size = 0, rc;
 	unsigned int i;
-	for (i = 0; i < count; i++)
-		size += file_size(argv[i * 2 + 1]);
+	for (i = 0; i < count; i++) {
+		rc = file_size(argv[i * 2 + 1]);
+		if (rc < 0)
+			return 0; /* file_size() error */
+		size += rc;
+	}
 
 	progress_start(progress, size); /* set total size and progress callback */
 
