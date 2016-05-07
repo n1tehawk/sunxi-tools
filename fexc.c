@@ -26,8 +26,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#define pr_info(...)	errf("fexc: " __VA_ARGS__)
-#define pr_err(...)	errf("E: fexc: " __VA_ARGS__)
+#define pr_inf(...)	pr_error("fexc: " __VA_ARGS__)
+#define pr_err(...)	pr_error("E: fexc: " __VA_ARGS__)
 
 enum script_format {
 	FEX_SCRIPT_FORMAT,
@@ -215,13 +215,12 @@ done:
  */
 static inline void app_usage(const char *arg0, int mode)
 {
-	errf("Usage: %s [-vq]%s[<input> [<output>]]\n", arg0,
-	     mode ? " " : " [-I <infmt>] [-O <outfmt>] ");
+	pr_error("Usage: %s [-vq]%s[<input> [<output>]]\n", arg0,
+		 mode ? " " : " [-I <infmt>] [-O <outfmt>] ");
 
 	if (mode == 0)
-		fputs("\ninfmt:  fex, bin  (default:fex)"
-		      "\noutfmt: fex, bin, uboot  (default:bin)\n",
-		      stderr);
+		pr_error("\ninfmt:  fex, bin  (default:fex)"
+			 "\noutfmt: fex, bin, uboot  (default:bin)\n");
 }
 
 static inline int app_choose_mode(char *arg0)
@@ -270,8 +269,8 @@ int main(int argc, char *argv[])
 			case BIN_SCRIPT_FORMAT:
 				break;
 			default:
-				errf("%s: invalid format -- \"%s\"\n",
-				     argv[0], optarg);
+				pr_error("%s: invalid format -- \"%s\"\n",
+					 argv[0], optarg);
 				goto show_usage;
 			}
 			break;
@@ -282,8 +281,8 @@ int main(int argc, char *argv[])
 					break;
 			}
 			if (!formats[outfmt]) {
-				errf("%s: invalid format -- \"%s\"\n",
-				     argv[0], optarg);
+				pr_error("%s: invalid format -- \"%s\"\n",
+					 argv[0], optarg);
 				goto show_usage;
 			}
 			break;
@@ -313,9 +312,9 @@ show_usage:
 	}
 
 	if (verbose>0)
-		errf("%s: from %s:%s to %s:%s\n", argv[0],
-		     formats[infmt], filename[0]?filename[0]:"<stdin>",
-		     formats[outfmt], filename[1]?filename[1]:"<stdout>");
+		pr_error("%s: from %s:%s to %s:%s\n", argv[0],
+			 formats[infmt], filename[0]?filename[0]:"<stdin>",
+			 formats[outfmt], filename[1]?filename[1]:"<stdout>");
 
 	if ((script = script_new()) == NULL) {
 		perror("malloc");

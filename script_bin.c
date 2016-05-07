@@ -26,11 +26,11 @@
 #include "script.h"
 #include "script_bin.h"
 
-#define pr_info(...)	errf("fexc-bin: " __VA_ARGS__)
-#define pr_err(...)	errf("E: fexc-bin: " __VA_ARGS__)
+#define pr_inf(...)	pr_error("fexc-bin: " __VA_ARGS__)
+#define pr_err(...)	pr_error("E: fexc-bin: " __VA_ARGS__)
 
 #ifdef DEBUG
-#define pr_debug(...)	errf("D: fexc-bin: " __VA_ARGS__)
+#define pr_debug(...)	pr_error("D: fexc-bin: " __VA_ARGS__)
 #else
 #define pr_debug(...)
 #endif
@@ -329,9 +329,9 @@ int script_decompile_bin(void *bin, size_t bin_size,
 		return 0;
 	}
 
-	pr_info("%s: version: %u.%u.%u\n", filename,
+	pr_inf("%s: version: %u.%u.%u\n", filename,
 		head->version[0], head->version[1], head->version[2]);
-	pr_info("%s: size: %zu (%u sections)\n", filename,
+	pr_inf("%s: size: %zu (%u sections)\n", filename,
 		bin_size, head->sections);
 
 	/* TODO: SANITY: compare head.sections with bin_size */

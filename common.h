@@ -38,6 +38,13 @@
 #endif
 
 /** shortcut to printf to stderr */
-#define errf(...)	fprintf(stderr, __VA_ARGS__)
+#define pr_error(...)	fprintf(stderr, __VA_ARGS__)
+
+/** conditional printf for informational output */
+#define pr_info(...) \
+	do { \
+		if (verbose) printf(__VA_ARGS__); \
+		fflush(stdout); \
+	} while (0)
 
 #endif /* _SUNXI_TOOLS_COMMON_H */

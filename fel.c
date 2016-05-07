@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+#include "common.h"
 #include "portable_endian.h"
 #include "progress.h"
 
@@ -38,13 +39,13 @@ static const uint16_t AW_USB_PRODUCT_ID = 0xEFE8;
 void usb_error(int rc, const char *caption, int exitcode)
 {
 	if (caption)
-		fprintf(stderr, "%s ", caption);
+		pr_error("%s ", caption);
 
 #if defined(LIBUSBX_API_VERSION) && (LIBUSBX_API_VERSION >= 0x01000102)
-	fprintf(stderr, "ERROR %d: %s\n", rc, libusb_strerror(rc));
+	pr_error("ERROR %d: %s\n", rc, libusb_strerror(rc));
 #else
 	/* assume that libusb_strerror() is missing in the libusb API */
-	fprintf(stderr, "ERROR %d\n", rc);
+	pr_error("ERROR %d\n", rc);
 #endif
 
 	if (exitcode != 0)
@@ -81,15 +82,6 @@ static bool verbose = false; /* If set, makes the 'fel' tool more talkative */
 static uint32_t uboot_entry = 0; /* entry point (address) of U-Boot */
 static uint32_t uboot_size  = 0; /* size of U-Boot binary */
 
-static void pr_info(const char *fmt, ...)
-{
-	va_list arglist;
-	if (verbose) {
-		va_start(arglist, fmt);
-		vprintf(fmt, arglist);
-		va_end(arglist);
-	}
-}
 
 static const int AW_USB_MAX_BULK_SEND = 4 * 1024 * 1024; /* 4 MiB per bulk request */
 
