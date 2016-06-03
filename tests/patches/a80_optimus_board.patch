@@ -1,0 +1,13 @@
+See https://github.com/linux-sunxi/sunxi-boards/issues/52
+
+--- orig/sunxi-boards/sys_config/a80/a80_optimus_board.fex
++++ new/sunxi-boards/sys_config/a80/a80_optimus_board.fex
+@@ -445,7 +445,7 @@
+ [motor_para]
+ motor_used          = 0
+ motor_shake         = 0
+-motor_ldo           = axp22_ldoio0
++motor_ldo           = "axp22_ldoio0"
+ motor_ldo_voltage   = 3300
+ 
+ ;----------------------------------------------------------------------------------

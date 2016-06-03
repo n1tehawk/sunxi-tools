@@ -55,6 +55,7 @@ PREFIX  ?= /usr/local
 BINDIR  ?= $(PREFIX)/bin
 
 .PHONY: all clean tools target-tools install install-tools install-target-tools
+.PHONY: check
 
 all: tools target-tools
 
@@ -84,6 +85,7 @@ install-target-tools: $(TARGET_TOOLS)
 
 
 clean:
+	make -C tests/ clean
 	@rm -vf $(TOOLS) $(FEXC_LINKS) $(TARGET_TOOLS) $(MISC_TOOLS)
 	@rm -vf *.o *.elf *.sunxi *.bin *.nm *.orig
 
@@ -162,3 +164,6 @@ sunxi-script_extractor: script_extractor.c
 	@for x in $(TOOLS) $(FEXC_LINKS) $(TARGET_TOOLS) '*.o' '*.swp'; do \
 		echo "$$x"; \
 	done > $@
+
+check: $(FEXC_LINKS)
+	make -C tests/
