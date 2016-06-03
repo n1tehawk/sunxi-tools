@@ -6,3 +6,6 @@ FEX=$1
 BIN=${FEX/%.fex/.bin}
 REVERSE=${FEX/%.fex/.new}
 ${FEX2BIN} ${FEX} ${BIN}
+${BIN2FEX} ${BIN} ${REVERSE}
+# preprocess .fex, then compare it to the bin2fex output
+./unify-fex ${FEX} | diff -uwB - ${REVERSE}
