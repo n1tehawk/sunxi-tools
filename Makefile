@@ -167,3 +167,13 @@ sunxi-script_extractor: script_extractor.c
 
 check: $(FEXC_LINKS)
 	make -C tests/
+
+#experimental
+coverage:
+	make -B EXTRA_CFLAGS=--coverage LDFLAGS=--coverage
+	make check
+	gcov *.gcda
+
+# (personal use, for cleaning up gcov files)
+mrproper: clean
+	rm -rf *.gcno *.gcda *.gcov
