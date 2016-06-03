@@ -17,6 +17,10 @@ matrix:
     - os: osx
       compiler: gcc
 
+# when building, treat all warnings as errors
+env:
+  - EXTRA_CFLAGS=-Werror
+
 # take care of the libusb dependency for Linux
 addons:
   apt:
@@ -30,10 +34,9 @@ before_install:
       brew install libusb;
     fi
 
-# build using the Makefile, treat all warnings as errors
+# build via Makefile, with a single overall status
 script:
-  - make EXTRA_CFLAGS=-Werror
-  - make misc EXTRA_CFLAGS=-Werror
+  - make && make misc && make check
 
 # turn off email notifications
 notifications:
