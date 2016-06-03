@@ -3,9 +3,10 @@ sudo: false
 
 language: c
 
-# treat all warnings as errors, fake cross-toolchain (build everything on host)
+# treat all warnings as errors, fake cross-toolchain (build everything on host),
+# include gcov support
 env:
-  - CFLAGS="-g -O2 -Werror" CROSS_COMPILE=""
+  - CFLAGS="-g -O2 -Werror" LDFLAGS=--coverage CROSS_COMPILE=""
 
 os:
   - linux
@@ -28,12 +29,14 @@ addons:
     - libusb-1.0-0-dev
 
 # take care of the libusb dependency for Mac OS X; select make/install target
+# get cpp-coveralls for linux
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
       brew update;
       brew install libusb;
       export TARGET=tools;
     else
+      pip install --user cpp-coveralls;
       export TARGET=all;
     fi
 
@@ -44,6 +47,15 @@ script:
 # run/simulate a test install
 after_success:
   - make install-${TARGET} install-misc DESTDIR=/tmp PREFIX=/sunxi-tools
+
+# for Linux, upload coverage report
+# Note: the gcc/gcov version on Travis has issues with "<built-in>",
+# see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=46266
+# For now, it seems that only clang is usable!
+after_script:
+  - if [[ "$TRAVIS_OS_NAME" == "linux" && "$CC" == "clang" ]]; then
+      coveralls -i fexc.c -i script.c -i script_bin.c -i script_fex.c ;
+    fi
 
 # turn off email notifications
 notifications:
