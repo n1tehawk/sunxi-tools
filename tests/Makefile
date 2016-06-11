@@ -2,8 +2,10 @@
 # tests/Makefile
 #
 
-BOARDS_URL := https://github.com/linux-sunxi/sunxi-boards/archive/master.zip
-BOARDS_DIR := sunxi-boards
+#BOARDS_URL := https://github.com/linux-sunxi/sunxi-boards/archive/master.zip
+#BOARDS_DIR := sunxi-boards
+BOARDS_URL := https://github.com/igorpecovnik/lib/archive/master.zip
+BOARDS_DIR := armbian
 
 checks: check_all_fex coverage
 
@@ -24,9 +26,9 @@ $(BOARDS_DIR).zip:
 $(BOARDS_DIR)/README: $(BOARDS_DIR).zip
 	@echo Extracting $< ...
 	unzip -q $<
-	mv sunxi-boards-master $(BOARDS_DIR)
+	mv lib-master $(BOARDS_DIR)
 	touch -r $(BOARDS_DIR) $<
-	cat patches/*.patch | patch -p1
+	#cat patches/*.patch | patch -p1
 
 unify-fex: unify-fex.c
 	$(CC) -Wall -Werror -o $@ $<
