@@ -1,8 +1,12 @@
 bin2fex
+config.h
+config.log
+config.status
 fex2bin
 sunxi-bootinfo
 sunxi-fel
 sunxi-fexc
+sunxi-meminfo
 sunxi-nand-part
 sunxi-pio
 version.h

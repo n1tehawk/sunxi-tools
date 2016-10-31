@@ -183,7 +183,9 @@ sunxi-script_extractor: script_extractor.c
 version.h:
 	@./autoversion.sh > $@
 
+AUTOCONF := config.status config.log config.h
 .gitignore: Makefile
-	@for x in $(TOOLS) $(FEXC_LINKS) $(TARGET_TOOLS) version.h '*.o' '*.swp'; do \
+	@for x in $(TOOLS) $(FEXC_LINKS) $(TARGET_TOOLS) version.h $(AUTOCONF) \
+	'*.o' '*.swp'; do \
 		echo "$$x"; \
 	done | sort -V > $@
