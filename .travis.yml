@@ -35,6 +35,10 @@ before_install:
       export TARGET="all CROSS_COMPILE=";
     fi
 
+# EXPERIMENTAL run of autoconf-based configure
+before_script:
+  - ./configure; cat config.log
+
 # build using the Makefile
 script:
   - make ${TARGET} && make misc
